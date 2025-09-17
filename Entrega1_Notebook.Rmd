@@ -87,14 +87,20 @@ metadata <- tibble(
 **Sugerencia:** redactar este apartado en estilo narrativo. Incluya detalles sobre el origen simulado de los datos, descripción general del instrumento de recolección y contexto de aplicación.
 
 ```{r marco-metodologico}
-marco_general <- datos |> 
-  summarise(
-    registros = n(),
-    variables = ncol(.),
-    variables_cuantitativas = sum(map_chr(., class) %in% c("numeric", "integer")),
-    variables_categoricas = sum(map_chr(., class) %in% c("factor", "ordered"))
-  ) |> 
-  pivot_longer(everything(), names_to = "indicador", values_to = "valor")
+marco_general <- tibble(
+  indicador = c(
+    "Registros",
+    "Variables",
+    "Variables cuantitativas",
+    "Variables categóricas"
+  ),
+  valor = c(
+    nrow(datos),
+    ncol(datos),
+    metadata |> filter(tipo %in% c("numeric", "integer")) |> nrow(),
+    metadata |> filter(tipo %in% c("factor", "ordered")) |> nrow()
+  )
+)
 
 gt::gt(marco_general)
 ```
