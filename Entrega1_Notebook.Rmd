@@ -301,6 +301,7 @@ resumen_cat_cuant <- map_dfr(ejemplos_cat, function(cat_var) {
       q3 = quantile(valor, 0.75, na.rm = TRUE),
       .groups = "drop"
     ) |> 
+    mutate(grupo = as.character(grupo)) |> 
     mutate(variable_categorica = cat_var)
 })
 
