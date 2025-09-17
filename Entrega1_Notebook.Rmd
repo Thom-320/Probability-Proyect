@@ -87,6 +87,7 @@ metadata <- tibble(
 **Sugerencia:** redactar este apartado en estilo narrativo. Incluya detalles sobre el origen simulado de los datos, descripción general del instrumento de recolección y contexto de aplicación.
 
 ```{r marco-metodologico}
+tipos <- vapply(datos, function(x) class(x)[1], character(1))
 marco_general <- tibble(
   indicador = c(
     "Registros",
@@ -97,8 +98,8 @@ marco_general <- tibble(
   valor = c(
     nrow(datos),
     ncol(datos),
-    metadata |> filter(tipo %in% c("numeric", "integer")) |> nrow(),
-    metadata |> filter(tipo %in% c("factor", "ordered")) |> nrow()
+    sum(tipos %in% c("numeric", "integer", "double")),
+    sum(tipos %in% c("factor", "ordered"))
   )
 )
 
