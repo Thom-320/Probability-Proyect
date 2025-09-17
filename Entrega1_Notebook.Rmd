@@ -1,8 +1,10 @@
 ---
 title: "Análisis de estilo de vida y salud"
-author: "[Actualizar con nombres del equipo]"
+author: '[Actualizar con nombres del equipo]'
 date: "`r format(Sys.Date(), '%d de %B de %Y')`"
 output:
+  pdf_document:
+    toc: true
   html_document:
     toc: true
     toc_float: true
