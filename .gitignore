@@ -21,5 +21,10 @@ Thumbs.db
 __pycache__/
 
 # Salidas temporales
-*.html
 *.log
+*.tex
+*.toc
+reports/*_files/
+
+# Permitir reportes HTML finales
+!reports/*.html

@@ -1,0 +1,175 @@
+---
+title: "Análisis Descriptivo e Inferencial de Salud y Estilo de Vida"
+author: "[Integrantes del Grupo] | Profesora: [Nombre] | Asignatura: Probabilidad y Estadística 2 | Fecha: `r format(Sys.Date())`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+    number_sections: false
+    keep_tex: false
+  html_document:
+    toc: false
+    number_sections: false
+fontsize: 12pt
+geometry: margin=1in
+mainfont: "Latin Modern Roman"
+header-includes:
+  - \linespread{1.15}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, fig.width=6.5, fig.height=4, dpi=300)
+library(tidyverse); library(janitor); library(psych); library(corrplot); library(effectsize); library(patchwork); set.seed(123)
+df <- read_csv("../data/health_lifestyle_classification.csv", show_col_types = FALSE) %>% clean_names()
+
+render_table <- function(data, caption = NULL, html_font_size = 9, ...) {
+  tab <- knitr::kable(data, caption = caption, ...)
+  if (knitr::is_html_output()) {
+    tab <- kableExtra::kable_styling(tab, font_size = html_font_size)
+  }
+  tab
+}
+```
+
+# 1. Marco Metodológico y Objetivo
+Los datos provienen del dataset "Health Lifestyle Classification" (encuesta estructurada simulada sobre hábitos de salud y estilo de vida). Consta de `r nrow(df)` registros y `r ncol(df)` variables: demográficas, biométricas, conductuales, salud mental y socioeconómicas.
+
+**Tipología (muestra):**
+```{r var-types}
+var_types <- tibble(variable = names(df), tipo = map_chr(df, ~class(.x)[1]), na = map_int(df, ~sum(is.na(.x))), pct_na = round(100*na/nrow(df),2))
+var_types %>%
+  head(12) %>%
+  render_table(caption="Muestra de tipología y NA", html_font_size = 8)
+```
+**Objetivo General:** Caracterizar patrones de salud y estilo de vida e inferir sobre parámetros clave.
+
+**Objetivos Específicos:** (i) Describir distribuciones y relaciones; (ii) Evaluar si μ(BMI)=25; (iii) Evaluar si p(healthy)=0.5.
+
+# 2. Variables Categóricas
+```{r cat-summary}
+cat_vars <- names(df %>% select(where(is.character)))
+cat_summary <- map_df(cat_vars, ~df %>% count(.data[[.x]]) %>% mutate(variable=.x) %>% rename(valor=1, frecuencia=n)) %>% group_by(variable) %>% mutate(pct=round(100*frecuencia/sum(frecuencia),1))
+cat_summary %>%
+  filter(variable %in% c("gender","target","education_level")) %>%
+  group_by(variable) %>%
+  slice_max(order_by=frecuencia, n=5) %>%
+  ungroup() %>%
+  render_table(caption="Frecuencias (Top categorías seleccionadas)", html_font_size = 8)
+```
+```{r cat-plots, fig.height=3.8}
+plot_cat <- function(var){ ggplot(df, aes(x=.data[[var]])) + geom_bar(fill="#2E6F9E", alpha=0.8) + labs(title=var, x=NULL, y="Freq") + theme_minimal(base_size=9) + theme(axis.text.x=element_text(angle=30,hjust=1)) }
+key_cat <- intersect(c("gender","target","education_level"), names(df))
+wrap_plots(lapply(key_cat, plot_cat), nrow=1)
+```
+```{r cat-bivariate, fig.height=3.8}
+if(all(c("gender","target") %in% names(df))){
+  p_stack <- df %>% filter(!is.na(gender), !is.na(target)) %>%
+    ggplot(aes(x=gender, fill=target)) + geom_bar(position="fill") + scale_y_continuous(labels=scales::percent) +
+    labs(title="Distribución relativa de target por género", x="Género", y="Proporción", fill="Target") + theme_minimal(base_size=9)
+  chi_tab <- table(df$gender, df$target)
+  chi_obj <- suppressWarnings(chisq.test(chi_tab)); cramer <- effectsize::cramers_v(chi_tab)
+  print(p_stack)
+  cat(sprintf("Chi²=%.2f (gl=%d) p=%.3g | Cramer's V=%.3f (%s)\n", chi_obj$statistic, chi_obj$parameter, chi_obj$p.value, cramer$Cramers_v, cramer$Magnitude))
+}
+```
+Interpretación: Se observa (i) distribución relativa del estado de salud por género y (ii) magnitud de asociación pequeña/moderada según Cramer's V.
+
+# 3. Variables Cuantitativas
+```{r num-desc}
+num_vars <- names(df %>% select(where(is.numeric)))
+base_stats <- df %>% select(any_of(num_vars)) %>% psych::describe() %>% as.data.frame() %>% rownames_to_column("variable") %>% select(variable, n, mean, sd, median, min, max, skew, kurtosis)
+base_stats %>%
+  filter(variable %in% c("age","bmi","sleep_hours","daily_steps")) %>%
+  render_table(caption="Estadísticos básicos", html_font_size = 8)
+```
+```{r num-extended}
+mode_vec <- function(x){ux<-na.omit(unique(x)); ux[which.max(tabulate(match(x,ux)))]}
+ext_stats <- df %>% select(any_of(num_vars)) %>% pivot_longer(everything(), names_to="variable", values_to="value") %>% group_by(variable) %>% summarise(n=sum(!is.na(value)), mean=mean(value,na.rm=TRUE), median=median(value,na.rm=TRUE), mode=mode_vec(value), sd=sd(value,na.rm=TRUE), iqr=IQR(value,na.rm=TRUE), p25=quantile(value,0.25,na.rm=TRUE), p75=quantile(value,0.75,na.rm=TRUE), skew=psych::skew(value), kurt=psych::kurtosi(value))
+ext_stats %>%
+  filter(variable %in% c("age","bmi","sleep_hours","daily_steps")) %>%
+  render_table(caption="Estadísticos extendidos", html_font_size = 8)
+```
+```{r quant-plots, fig.height=3.6}
+plots <- list(
+  ggplot(df, aes(x=age)) + geom_histogram(bins=30, fill="#69b3a2") + theme_minimal(base_size=9) + labs(title="Age", y="Freq"),
+  ggplot(df, aes(y=bmi)) + geom_boxplot(fill="#ffab00", alpha=.7) + theme_minimal(base_size=9) + labs(title="BMI"),
+  ggplot(df, aes(x=daily_steps, y=bmi)) + geom_point(alpha=.4) + geom_smooth(method="lm", se=FALSE, color="red", size=.5) + theme_minimal(base_size=9) + labs(title="BMI vs Steps", y="BMI", x="Daily Steps")
+)
+wrap_plots(plots, nrow=1)
+```
+```{r corr-matrix, fig.height=3.6}
+cor_vars <- intersect(c("age","bmi","height","weight","sleep_hours","daily_steps"), names(df))
+cmat <- cor(df[cor_vars], use="complete.obs")
+corrplot(cmat, method="color", type="upper", addCoef.col="black", tl.col="black", number.cex=.5)
+```
+Distribución: Age y Sleep ~ simétricas; Daily Steps asimetría positiva; BMI ligera asimetría. Sugerencias: Age/Sleep ~ Normal; Steps ~ Gamma/Log-normal; BMI ~ Normal/log-normal.
+
+# 4. Relación Mixta (Cuantitativa ~ Categórica)
+```{r bmi-gender}
+if(all(c("bmi","gender") %in% names(df))){
+  by_gender <- df %>% filter(!is.na(bmi), !is.na(gender)) %>% group_by(gender) %>% summarise(n=n(), mean=mean(bmi), sd=sd(bmi), median=median(bmi), q1=quantile(bmi,0.25), q3=quantile(bmi,0.75))
+  eff <- effectsize::cohens_d(bmi ~ gender, data=df, pooled_sd=TRUE)
+  by_gender %>% render_table(caption="BMI por género", html_font_size = 8)
+  print(ggplot(df, aes(x=gender, y=bmi, fill=gender)) + geom_boxplot(alpha=.7) + theme_minimal(base_size=9) + theme(legend.position="none") + labs(title="BMI por género"))
+  cat(sprintf("Cohen's d=%.3f (%s)\n", eff$Cohens_d, eff$Magnitude))
+}
+```
+Interpretación: Se evalúan diferencias prácticas (no solo significancia) en BMI por género.
+
+# 5. Pruebas de Hipótesis
+```{r test-mean}
+alpha <- 0.05
+if("bmi" %in% names(df)){
+  bmi_vec <- df$bmi[!is.na(df$bmi)]
+  t_res <- t.test(bmi_vec, mu=25)
+  d_val <- effectsize::cohens_d(bmi_vec, mu=25)
+  render_table(
+    tibble(
+      Test="Media BMI",
+      H0="mu=25",
+      Media=mean(bmi_vec),
+      t=unname(t_res$statistic),
+      gl=unname(t_res$parameter),
+      p=t_res$p.value,
+      IC_LI=t_res$conf.int[1],
+      IC_LS=t_res$conf.int[2],
+      d=d_val$Cohens_d
+    ),
+    caption="Prueba de media BMI",
+    html_font_size = 8
+  )
+}
+```
+```{r test-prop}
+if("target" %in% names(df)){
+  targ <- df$target[!is.na(df$target)]
+  n_healthy <- sum(targ=="healthy"); n_tot <- length(targ); p0 <- 0.5; p_hat <- n_healthy/n_tot
+  prop_res <- prop.test(n_healthy, n_tot, p=p0, correct=FALSE)
+  h <- 2*asin(sqrt(p_hat)) - 2*asin(sqrt(p0))
+  render_table(
+    tibble(
+      Test="Proporción healthy",
+      H0="p=0.5",
+      p_muestral=p_hat,
+      Chi2=unname(prop_res$statistic),
+      p=prop_res$p.value,
+      IC_LI=prop_res$conf.int[1],
+      IC_LS=prop_res$conf.int[2],
+      Cohens_h=h
+    ),
+    caption="Prueba de proporción",
+    html_font_size = 8
+  )
+}
+```
+Interpretación: Reportar relevancia práctica además de p-valor (magnitud d / h; diferencia absoluta de proporción).
+
+# 6. Conclusiones y Limitaciones
+- Se caracterizaron distribuciones clave y asociaciones moderadas esperadas (peso-altura-BMI).
+- Evidencia inferencial respecto a BMI y proporción healthy (interpretar en función de intervalos y tamaños de efecto; valores de p pueden ser muy pequeños por gran n).
+- Limitaciones: dataset sintético/encuesta simulada; posibles sesgos de medición; no implica causalidad; gran tamaño produce significancia de efectos pequeños.
+- Recomendación: extender a modelos multivariados (regresión / clasificación) en siguientes entregas.
+
+```{r session-info}
+sessionInfo()
+```
