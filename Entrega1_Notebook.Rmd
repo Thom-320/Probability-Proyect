@@ -118,6 +118,7 @@ cat_vars <- metadata |>
 
 frecuencias_cat <- datos |> 
   select(all_of(cat_vars)) |> 
+  mutate(across(everything(), as.character)) |> 
   pivot_longer(everything(), names_to = "variable", values_to = "categoria") |> 
   group_by(variable, categoria) |> 
   summarise(n = n(), .groups = "drop") |> 
