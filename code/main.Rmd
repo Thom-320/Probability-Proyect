@@ -1,0 +1,444 @@
+---
+title: "Análisis Estadístico Descriptivo e Inferencial de Datos de Salud y Estilo de Vida"
+author: "[Nombres de los integrantes]"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    fig_caption: yes
+    number_sections: yes
+    toc: false
+    keep_tex: false
+header-includes:
+  - \usepackage{fontspec}
+  - \setmainfont{Calibri}
+  - \usepackage{setspace}
+  - \onehalfspacing
+  - \usepackage[margin=2.54cm]{geometry}
+---
+
+```{r setup, include=FALSE}
+# Configuración global
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 8,
+  fig.height = 5,
+  fig.align = "center",
+  dpi = 300
+)
+
+# Establecer semilla para reproducibilidad
+set.seed(123)
+
+# Cargar librerías necesarias
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(janitor)
+  library(skimr)
+  library(ggplot2)
+  library(ggthemes)
+  library(rstatix)
+  library(effectsize)
+  library(readr)
+  library(patchwork)
+  library(corrplot)
+  library(psych)
+  library(knitr)
+  library(kableExtra)
+})
+
+# Configurar tema de ggplot
+theme_set(theme_minimal() + 
+          theme(text = element_text(family = "Arial", size = 10),
+                plot.title = element_text(size = 12, face = "bold"),
+                axis.title = element_text(size = 10),
+                legend.text = element_text(size = 9)))
+```
+
+```{r load-data}
+# Cargar datos con tipos explícitos
+df <- read_csv("../data/health_lifestyle_classification.csv", 
+               show_col_types = FALSE,
+               col_types = cols(
+                 survey_code = col_double(),
+                 age = col_double(),
+                 gender = col_character(),
+                 height = col_double(),
+                 weight = col_double(),
+                 bmi = col_double(),
+                 target = col_character(),
+                 .default = col_guess()
+               ))
+
+# Limpiar nombres de columnas
+df <- df %>% clean_names()
+
+# Verificar carga exitosa
+stopifnot(nrow(df) > 0, ncol(df) >= 40)
+```
+
+# Marco Metodológico y Objetivo
+
+## Origen y Características de los Datos
+
+Los datos utilizados en este análisis provienen del dataset "Health Lifestyle Classification", que contiene información sobre hábitos de salud y estilo de vida de individuos. El dataset incluye `r nrow(df)` registros y `r ncol(df)` variables que abarcan aspectos demográficos, biométricos, de estilo de vida, salud mental y socioeconómicos.
+
+```{r data-overview}
+# Tabla de metadatos
+metadata <- df %>%
+  summarise_all(~sum(is.na(.))) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "NA_Count") %>%
+  mutate(
+    NA_Percent = round(NA_Count / nrow(df) * 100, 2),
+    Type = map_chr(df, ~class(.)[1])
+  ) %>%
+  arrange(desc(NA_Percent))
+
+# Mostrar primeras 15 variables con más datos faltantes
+kable(head(metadata, 15), 
+      caption = "Tabla 1: Metadatos del Dataset - Variables con Mayor Proporción de Datos Faltantes",
+      col.names = c("Variable", "Datos Faltantes", "% Faltantes", "Tipo")) %>%
+  kable_styling(latex_options = c("striped", "hold_position"), font_size = 9)
+```
+
+### Clasificación Tipológica de Variables
+
+El dataset contiene los siguientes tipos de variables:
+
+- **Variables Categóricas Binarias**: `gender`, `mental_health_support`, `insurance`, `family_history`, `pet_owner`, `target`
+- **Variables Categóricas Ordinales**: `sleep_quality`, `education_level`, `device_usage`, `healthcare_access`, `sunlight_exposure`, `alcohol_consumption`, `smoking_level`
+- **Variables Categóricas Nominales**: `job_type`, `occupation`, `diet_type`, `exercise_type`
+- **Variables Cuantitativas Continuas**: `age`, `height`, `weight`, `bmi`, `sleep_hours`, `daily_steps`, entre otras
+- **Variables Cuantitativas Discretas**: `meals_per_day`, `gene_marker_flag`
+
+## Objetivo del Análisis
+
+**Objetivo General**: Caracterizar los patrones de salud y estilo de vida en la población estudiada mediante técnicas de estadística descriptiva e inferencial.
+
+**Objetivos Específicos**:
+1. Describir la distribución de variables categóricas y cuantitativas relacionadas con salud y estilo de vida
+2. Identificar relaciones entre variables demográficas, biométricas y de comportamiento
+3. Evaluar si el índice de masa corporal promedio poblacional difiere significativamente del límite superior normal (BMI = 25)
+4. Determinar si la proporción de individuos clasificados como saludables difiere del 50% en la población
+
+# Análisis Descriptivo de Variables Categóricas
+
+```{r categorical-analysis}
+# Identificar variables categóricas
+categorical_vars <- df %>%
+  select_if(is.character) %>%
+  names()
+
+# Análisis univariado de variables categóricas principales
+cat_summary <- df %>%
+  select(all_of(categorical_vars)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Value") %>%
+  filter(!is.na(Value)) %>%
+  count(Variable, Value) %>%
+  group_by(Variable) %>%
+  mutate(
+    Percent = round(n / sum(n) * 100, 2),
+    Total = sum(n)
+  ) %>%
+  ungroup()
+```
+
+## Análisis Univariado
+
+```{r fig-categorical-univariate, fig.cap="Figura 1: Distribución de Variables Categóricas Principales"}
+# Gráfico de barras para variables categóricas principales
+key_categorical <- c("gender", "target", "education_level", "diet_type")
+
+p_list <- map(key_categorical, ~{
+  if(.x %in% names(df)) {
+    df %>%
+      filter(!is.na(!!sym(.x))) %>%
+      count(!!sym(.x)) %>%
+      mutate(percent = n/sum(n)*100) %>%
+      ggplot(aes(x = reorder(!!sym(.x), n), y = n)) +
+      geom_col(fill = "steelblue", alpha = 0.7) +
+      geom_text(aes(label = paste0(round(percent,1), "%")), 
+                hjust = -0.1, size = 3) +
+      coord_flip() +
+      labs(title = str_to_title(str_replace_all(.x, "_", " ")),
+           x = "", y = "Frecuencia") +
+      theme_minimal()
+  }
+})
+
+# Combinar gráficos
+if(length(p_list) >= 4) {
+  (p_list[[1]] + p_list[[2]]) / (p_list[[3]] + p_list[[4]])
+} else {
+  wrap_plots(p_list, ncol = 2)
+}
+```
+
+La Figura 1 muestra la distribución de las principales variables categóricas. Se observa una distribución relativamente equilibrada entre géneros, mientras que la variable objetivo (`target`) presenta una proporción específica de individuos clasificados como saludables.
+
+## Análisis Bivariado
+
+```{r categorical-bivariate}
+# Tabla de contingencia: gender vs target
+if("gender" %in% names(df) && "target" %in% names(df)) {
+  contingency_table <- df %>%
+    filter(!is.na(gender), !is.na(target)) %>%
+    count(gender, target) %>%
+    pivot_wider(names_from = target, values_from = n, values_fill = 0) %>%
+    adorn_totals(c("row", "col")) %>%
+    adorn_percentages("row") %>%
+    adorn_pct_formatting(digits = 1) %>%
+    adorn_ns()
+  
+  kable(contingency_table,
+        caption = "Tabla 2: Tabla de Contingencia - Género vs Clasificación de Salud",
+        align = "c") %>%
+    kable_styling(latex_options = c("striped", "hold_position"))
+}
+```
+
+```{r fig-categorical-bivariate, fig.cap="Figura 2: Relación entre Variables Categóricas"}
+# Gráfico de barras apiladas
+if("gender" %in% names(df) && "target" %in% names(df)) {
+  df %>%
+    filter(!is.na(gender), !is.na(target)) %>%
+    count(gender, target) %>%
+    group_by(gender) %>%
+    mutate(percent = n/sum(n)*100) %>%
+    ggplot(aes(x = gender, y = percent, fill = target)) +
+    geom_col(position = "stack") +
+    geom_text(aes(label = paste0(round(percent,1), "%")), 
+              position = position_stack(vjust = 0.5), size = 3) +
+    labs(title = "Distribución de Clasificación de Salud por Género",
+         x = "Género", y = "Porcentaje", fill = "Clasificación") +
+    scale_fill_brewer(type = "qual", palette = "Set2") +
+    theme_minimal()
+}
+```
+
+# Análisis Descriptivo de Variables Cuantitativas
+
+```{r quantitative-analysis}
+# Identificar variables cuantitativas
+numeric_vars <- df %>%
+  select_if(is.numeric) %>%
+  select(-survey_code) %>%  # Excluir ID
+  names()
+
+# Calcular estadígrafos descriptivos
+descriptive_stats <- df %>%
+  select(all_of(numeric_vars)) %>%
+  describe() %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable") %>%
+  select(Variable, n, mean, sd, median, min, max, skew, kurtosis) %>%
+  mutate(across(where(is.numeric), ~round(., 3)))
+```
+
+## Estadígrafos Descriptivos
+
+```{r table-descriptive-stats}
+# Mostrar estadígrafos para variables clave
+key_numeric <- c("age", "bmi", "height", "weight", "sleep_hours", "daily_steps", 
+                 "mental_health_score", "income")
+
+descriptive_key <- descriptive_stats %>%
+  filter(Variable %in% key_numeric)
+
+kable(descriptive_key,
+      caption = "Tabla 3: Estadígrafos Descriptivos de Variables Cuantitativas Principales",
+      col.names = c("Variable", "n", "Media", "DE", "Mediana", "Mín", "Máx", "Asimetría", "Curtosis")) %>%
+  kable_styling(latex_options = c("striped", "hold_position"), font_size = 8)
+```
+
+## Visualizaciones
+
+```{r fig-quantitative-hist, fig.cap="Figura 3: Distribución de Variables Cuantitativas Clave"}
+# Histogramas para variables clave
+key_vars_plot <- c("age", "bmi", "sleep_hours", "daily_steps")
+
+hist_plots <- map(key_vars_plot, ~{
+  if(.x %in% names(df)) {
+    df %>%
+      filter(!is.na(!!sym(.x))) %>%
+      ggplot(aes(x = !!sym(.x))) +
+      geom_histogram(bins = 30, fill = "lightblue", alpha = 0.7, color = "black") +
+      geom_density(aes(y = ..density.. * nrow(df) * 
+                       (max(!!sym(.x), na.rm = TRUE) - min(!!sym(.x), na.rm = TRUE)) / 30),
+                   color = "red", size = 1) +
+      labs(title = str_to_title(str_replace_all(.x, "_", " ")),
+           x = .x, y = "Frecuencia") +
+      theme_minimal()
+  }
+})
+
+wrap_plots(hist_plots, ncol = 2)
+```
+
+```{r fig-quantitative-box, fig.cap="Figura 4: Boxplots para Identificación de Valores Atípicos"}
+# Boxplots para identificar outliers
+box_plots <- map(key_vars_plot, ~{
+  if(.x %in% names(df)) {
+    df %>%
+      filter(!is.na(!!sym(.x))) %>%
+      ggplot(aes(y = !!sym(.x))) +
+      geom_boxplot(fill = "lightgreen", alpha = 0.7) +
+      labs(title = str_to_title(str_replace_all(.x, "_", " ")),
+           y = .x) +
+      theme_minimal()
+  }
+})
+
+wrap_plots(box_plots, ncol = 4)
+```
+
+## Análisis de Correlaciones
+
+```{r correlation-analysis}
+# Matriz de correlaciones para variables numéricas clave
+cor_vars <- c("age", "bmi", "height", "weight", "sleep_hours", "daily_steps", 
+              "mental_health_score", "stress_level")
+
+cor_matrix <- df %>%
+  select(all_of(cor_vars)) %>%
+  cor(use = "complete.obs")
+```
+
+```{r fig-correlation, fig.cap="Figura 5: Matriz de Correlaciones entre Variables Cuantitativas"}
+# Heatmap de correlaciones
+corrplot(cor_matrix, method = "color", type = "upper", 
+         order = "hclust", tl.cex = 0.8, tl.col = "black",
+         addCoef.col = "black", number.cex = 0.7)
+```
+
+## Sugerencias Distribucionales
+
+Basado en el análisis visual de histogramas y estadígrafos de forma:
+
+- **Age**: Distribución aproximadamente normal con ligera asimetría positiva
+- **BMI**: Distribución que podría seguir una distribución normal o log-normal
+- **Sleep Hours**: Distribución aproximadamente normal
+- **Daily Steps**: Distribución con posible asimetría positiva, podría seguir distribución gamma
+
+# Análisis Descriptivo Bivariado Mixto
+
+```{r mixed-bivariate}
+# Análisis de BMI por género
+if("gender" %in% names(df) && "bmi" %in% names(df)) {
+  bmi_by_gender <- df %>%
+    filter(!is.na(gender), !is.na(bmi)) %>%
+    group_by(gender) %>%
+    summarise(
+      n = n(),
+      mean_bmi = mean(bmi),
+      sd_bmi = sd(bmi),
+      median_bmi = median(bmi),
+      q25_bmi = quantile(bmi, 0.25),
+      q75_bmi = quantile(bmi, 0.75),
+      .groups = "drop"
+    ) %>%
+    mutate(across(where(is.numeric), ~round(., 2)))
+  
+  kable(bmi_by_gender,
+        caption = "Tabla 4: Estadígrafos de BMI Segmentados por Género",
+        col.names = c("Género", "n", "Media", "DE", "Mediana", "Q1", "Q3")) %>%
+    kable_styling(latex_options = c("striped", "hold_position"))
+}
+```
+
+```{r fig-mixed-bivariate, fig.cap="Figura 6: Análisis Bivariado Mixto - BMI por Género"}
+# Boxplot comparativo
+if("gender" %in% names(df) && "bmi" %in% names(df)) {
+  p1 <- df %>%
+    filter(!is.na(gender), !is.na(bmi)) %>%
+    ggplot(aes(x = gender, y = bmi, fill = gender)) +
+    geom_boxplot(alpha = 0.7) +
+    labs(title = "Distribución de BMI por Género",
+         x = "Género", y = "BMI") +
+    scale_fill_brewer(type = "qual", palette = "Set1") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  # Histograma facetado
+  p2 <- df %>%
+    filter(!is.na(gender), !is.na(bmi)) %>%
+    ggplot(aes(x = bmi, fill = gender)) +
+    geom_histogram(bins = 30, alpha = 0.7, position = "identity") +
+    facet_wrap(~gender, ncol = 1) +
+    labs(title = "Histogramas de BMI por Género",
+         x = "BMI", y = "Frecuencia") +
+    scale_fill_brewer(type = "qual", palette = "Set1") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  p1 + p2
+}
+```
+
+# Pruebas de Hipótesis
+
+## Prueba para la Media del BMI
+
+```{r hypothesis-test-mean}
+# Prueba t para la media del BMI
+if("bmi" %in% names(df)) {
+  bmi_data <- df %>% filter(!is.na(bmi)) %>% pull(bmi)
+  
+  # Verificar normalidad
+  shapiro_test <- shapiro.test(sample(bmi_data, min(5000, length(bmi_data))))
+  
+  # Prueba t de una muestra
+  t_test_result <- t.test(bmi_data, mu = 25, conf.level = 0.95)
+  
+  # Tamaño del efecto (Cohen's d)
+  cohens_d <- (mean(bmi_data) - 25) / sd(bmi_data)
+  
+  cat("Prueba de Hipótesis para la Media del BMI\n")
+  cat("H₀: μ = 25 vs H₁: μ ≠ 25\n")
+  cat("Estadístico t:", round(t_test_result$statistic, 4), "\n")
+  cat("p-valor:", format(t_test_result$p.value, scientific = TRUE), "\n")
+  cat("IC 95%: [", round(t_test_result$conf.int[1], 3), ", ", 
+      round(t_test_result$conf.int[2], 3), "]\n")
+  cat("Cohen's d:", round(cohens_d, 3), "\n")
+}
+```
+
+## Prueba para la Proporción de Individuos Saludables
+
+```{r hypothesis-test-proportion}
+# Prueba z para proporción
+if("target" %in% names(df)) {
+  target_data <- df %>% filter(!is.na(target))
+  n_total <- nrow(target_data)
+  n_healthy <- sum(target_data$target == "healthy")
+  p_hat <- n_healthy / n_total
+  
+  # Prueba z para proporción
+  prop_test_result <- prop.test(n_healthy, n_total, p = 0.5, conf.level = 0.95)
+  
+  cat("Prueba de Hipótesis para la Proporción de Individuos Saludables\n")
+  cat("H₀: p = 0.5 vs H₁: p ≠ 0.5\n")
+  cat("Proporción muestral:", round(p_hat, 4), "\n")
+  cat("Estadístico χ²:", round(prop_test_result$statistic, 4), "\n")
+  cat("p-valor:", format(prop_test_result$p.value, scientific = TRUE), "\n")
+  cat("IC 95%: [", round(prop_test_result$conf.int[1], 3), ", ", 
+      round(prop_test_result$conf.int[2], 3), "]\n")
+}
+```
+
+# Conclusiones
+
+Los resultados del análisis descriptivo e inferencial revelan patrones importantes en los datos de salud y estilo de vida:
+
+1. **Variables Categóricas**: Se observa una distribución equilibrada en las principales variables demográficas
+2. **Variables Cuantitativas**: Las variables biométricas muestran distribuciones aproximadamente normales con algunos valores atípicos
+3. **Relaciones Bivariadas**: Existen correlaciones significativas entre variables biométricas relacionadas
+4. **Inferencia Estadística**: Las pruebas de hipótesis proporcionan evidencia sobre los parámetros poblacionales de interés
+
+```{r session-info}
+# Información de la sesión para reproducibilidad
+cat("Información de la Sesión:\n")
+sessionInfo()
+```

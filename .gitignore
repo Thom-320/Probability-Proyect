@@ -1,0 +1,25 @@
+# Historial y archivos generados por R
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Configuraciones locales de IDEs
+.idea/
+.vscode/
+.kiro/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+
+# Salidas temporales
+*.html
+*.log
