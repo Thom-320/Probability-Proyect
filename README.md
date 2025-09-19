@@ -10,14 +10,20 @@ Este proyecto aplica técnicas de estadística descriptiva e inferencial sobre e
 
 ```
 ├── code/                          # Código fuente en RMarkdown y scripts auxiliares
-│   ├── main.Rmd                  # Notebook principal para el informe en PDF
+│   ├── entrega1_notebook.Rmd     # Notebook CANÓNICO de la Entrega 1 (único)
+│   ├── entrega1_doc.Rmd          # Variante breve para generar el PDF corto (opcional)
 │   └── checks.R                  # Validaciones automatizadas
 ├── data/                          # Fuente de datos original
 │   └── health_lifestyle_classification.csv
-├── figs/                          # Carpeta para figuras exportadas (.gitkeep)
-├── reports/                       # Carpeta para reportes finales (.gitkeep)
-├── Entrega1_Notebook.Rmd          # Notebook R estructurado por rúbrica
-├── Proyecto.ipynb                 # Notebook Jupyter con el mismo flujo analítico
+├── figs/                          # Figuras exportadas (PNG) listas para el informe
+│   └── entrega1/*.png
+├── tab/                           # Tablas exportadas (CSV) listas para el informe
+├── reports/                       # Salidas renderizadas (HTML/PDF)
+│   ├── entrega1_notebook.html
+│   ├── entrega1_notebook.pdf
+│   ├── entrega_1.html
+│   └── entrega_1.pdf
+├── Proyecto.ipynb                 # Notebook Jupyter (opcional, lectura)
 └── README.md
 ```
 
@@ -28,13 +34,14 @@ Este proyecto aplica técnicas de estadística descriptiva e inferencial sobre e
 
 ### Instrucciones de Reproducción
 
-#### Opción 1: Render con RMarkdown
+#### Opción 1: Render con RMarkdown (Notebook único)
 ```bash
-Rscript -e "rmarkdown::render('code/main.Rmd', output_file='../reports/entrega_1.pdf')"
+Rscript -e "rmarkdown::render('code/entrega1_notebook.Rmd', output_dir='reports', output_file='entrega1_notebook.html')"
+Rscript -e "rmarkdown::render('code/entrega1_notebook.Rmd', output_format='pdf_document', output_dir='reports', output_file='entrega1_notebook.pdf')"
 ```
 
 #### Opción 2: Usar los notebooks
-- **RMarkdown**: abre `Entrega1_Notebook.Rmd` en RStudio y compila a HTML/PDF.
+- **RMarkdown**: abre `code/entrega1_notebook.Rmd` en RStudio y compila a HTML/PDF.
 - **Jupyter**: ejecuta `Proyecto.ipynb` con kernel de R (`IRkernel`) y exporta el resultado desde la interfaz.
 
 ### Validaciones
@@ -84,7 +91,7 @@ Rscript code/checks.R --phase=final
 ### Entregables
 
 1. **Documento PDF** (`reports/entrega_1.pdf`): Máximo 6 páginas, autocontenido
-2. **Notebook R** (`code/main.Rmd`): Código reproducible con salidas visibles
+2. **Notebook R** (`code/entrega1_notebook.Rmd`): Código reproducible con salidas visibles y exportables
 3. **Diccionario de Variables**: Descripción completa de todas las variables
 
 ### Fecha de Entrega

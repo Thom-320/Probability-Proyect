@@ -59,7 +59,7 @@ theme_set(theme_minimal() +
 
 ```{r load-data}
 # Cargar datos con tipos explícitos
-df <- read_csv("../data/health_lifestyle_classification.csv", 
+df <- read_csv("/Users/thom/Library/Mobile Documents/com~apple~CloudDocs/Universidad/Proba 2/Probability-Proyect/data/health_lifestyle_classification.csv",
                show_col_types = FALSE,
                col_types = cols(
                  survey_code = col_double(),

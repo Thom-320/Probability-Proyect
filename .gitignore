@@ -26,5 +26,8 @@ __pycache__/
 *.toc
 reports/*_files/
 
+# Inspiración (no versionable)
+Inspiration (other notebooks not mine)/
+
 # Permitir reportes HTML finales
 !reports/*.html
