@@ -24,7 +24,7 @@ df <- read_csv("../data/health_lifestyle_classification.csv", show_col_types = F
 
 render_table <- function(data, caption = NULL, html_font_size = 9, ...) {
   tab <- knitr::kable(data, caption = caption, ...)
-  if (knitr::is_html_output()) {
+  if (knitr::is_html_output() && requireNamespace("kableExtra", quietly = TRUE)) {
     tab <- kableExtra::kable_styling(tab, font_size = html_font_size)
   }
   tab

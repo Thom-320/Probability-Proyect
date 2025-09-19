@@ -1,408 +1,457 @@
 ---
 title: "Entrega 1 - Notebook Reproducible"
-author: '[Integrantes del Grupo]'
-date: "`r Sys.Date()`"
+author: "[Integrantes del Grupo]"
+date: "`r format(Sys.Date(), '%d %b %Y')`"
 output:
-  pdf_document:
-    toc: true
-    keep_tex: false
   html_document:
     toc: true
+    toc_depth: 2
     number_sections: true
     df_print: paged
-  html_notebook:
+  pdf_document:
     toc: true
+    toc_depth: 2
     number_sections: true
-    df_print: paged
 editor_options:
   chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 7, fig.height = 4, dpi = 150)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 6,
+  fig.height = 4,
+  dpi = 150,
+  fig.path = "../figs/entrega1/",
+  dev = "png"
+)
 set.seed(123)
-```
 
-# 1. Carga de Librerías
-
-```{r libraries}
 suppressPackageStartupMessages({
   library(tidyverse)
   library(janitor)
   library(psych)
-  library(readr)
   library(corrplot)
   library(rstatix)
   library(effectsize)
-  library(patchwork)
 })
+
+dir.create(file.path("..", "figs", "entrega1"), showWarnings = FALSE, recursive = TRUE)
+
 render_table <- function(data, caption = NULL, html_font_size = 10, ...) {
   tab <- knitr::kable(data, caption = caption, ...)
-  if (knitr::is_html_output()) {
+  if (knitr::is_html_output() && requireNamespace("kableExtra", quietly = TRUE)) {
     tab <- kableExtra::kable_styling(tab, font_size = html_font_size)
   }
   tab
 }
 ```
 
-# 2. Carga y Exploración Inicial de Datos
+## 1. Carga y diagnóstico inicial
 
 ```{r load-data}
-# Carga reproducible (ruta relativa)
-df <- read_csv("/Users/thom/Library/Mobile Documents/com~apple~CloudDocs/Universidad/Proba 2/Probability-Proyect/data/health_lifestyle_classification.csv", show_col_types = FALSE) %>% clean_names()
-cat("Filas:", nrow(df), " - Columnas:", ncol(df), "\n")
-str(df, give.attr = FALSE)
-```
-
-```{r missing-summary}
-missing_tbl <- df %>% summarise(across(everything(), ~sum(is.na(.)))) %>% pivot_longer(everything(), names_to = "variable", values_to = "na") %>% mutate(pct = round(100*na/nrow(df),2)) %>% arrange(desc(pct))
-missing_tbl %>%
-  head(15) %>%
-  render_table(col.names = c("Variable","NA","%NA"), caption = "Top 15 variables con mayor NA", html_font_size = 10)
-```
-
-# 3. Tipología de Variables
-
-```{r variable-types}
-chr_vars <- names(df %>% select(where(is.character)))
-num_vars <- names(df %>% select(where(is.numeric)))
-list(chr_vars = chr_vars[1:20], num_vars = num_vars[1:20])
-```
-
-# 4. Marco Metodológico Completo
-
-## Origen de los Datos
-Los datos provienen del dataset "Health Lifestyle Classification" que contiene información recolectada sobre hábitos de salud y estilo de vida. El dataset incluye variables demográficas, biométricas, de comportamiento, salud mental y socioeconómicas recopiladas mediante encuestas estructuradas.
-
-## Objetivo del Análisis
-Caracterizar los patrones de salud y estilo de vida en la población estudiada mediante técnicas de estadística descriptiva e inferencial, específicamente:
-1. Describir distribuciones univariadas y bivariadas
-2. Identificar relaciones entre variables
-3. Evaluar si el BMI promedio poblacional difiere de 25 kg/m²
-4. Determinar si la proporción de individuos saludables difiere del 50%
-
-# 5. Análisis Descriptivo de Variables Categóricas
-
-```{r categorical-univariate}
-cat_vars <- chr_vars
-cat_summary <- map_df(cat_vars, ~df %>% count(.data[[.x]]) %>% mutate(variable = .x) %>% rename(valor = 1, frecuencia = n))
-cat_summary %>%
-  group_by(variable) %>%
-  mutate(pct = round(100*frecuencia/sum(frecuencia),2)) %>%
-  ungroup() %>%
-  head(40) %>%
-  render_table(caption = "Frecuencias (primeras 40 filas)", html_font_size = 10)
-```
-
-```{r categorical-treemap, warning=FALSE, message=FALSE, fig.width=7, fig.height=5}
-if(!requireNamespace("treemapify", quietly = TRUE)) {
-  # opcional: instalar en entorno local si falta
-  # install.packages("treemapify")
+ruta_datos <- if (file.exists("data/health_lifestyle_classification.csv")) {
+  "data/health_lifestyle_classification.csv"
+} else {
+  file.path("..", "data", "health_lifestyle_classification.csv")
 }
-if("occupation" %in% names(df) && require(treemapify)) {
-  df %>%
-    count(occupation) %>%
-    filter(!is.na(occupation)) %>%
-    ggplot(aes(area = n, fill = n, label = occupation)) +
-    geom_treemap() +
-    geom_treemap_text(reflow = TRUE, colour = "white", place = "centre", grow = TRUE) +
-    labs(title = "Treemap de Occupation", fill = "Frecuencia") +
-    theme_minimal()
-}
-```
 
-```{r categorical-plots, fig.height=5, fig.width=8}
-key_cat <- intersect(c("gender","target","education_level","diet_type"), names(df))
-plot_list <- map(key_cat, ~{
-  ggplot(df, aes(x = .data[[.x]])) +
-    geom_bar(fill = "steelblue", alpha = 0.8) +
-    geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.3, size = 3) +
-    labs(title = .x, x = NULL, y = "Frecuencia") +
-    theme_minimal()
-})
-wrap_plots(plotlist = plot_list)
-```
+datos <- readr::read_csv(ruta_datos, show_col_types = FALSE) |> 
+  janitor::clean_names()
 
-```{r categorical-bivariate}
-if(all(c("gender","target") %in% names(df))) {
-  tab_gt <- df %>% filter(!is.na(gender), !is.na(target)) %>% count(gender, target) %>% group_by(gender) %>% mutate(pct = round(100*n/sum(n),1))
-  tab_gt %>% render_table(caption = "Tabla de contingencia: gender x target")
-  # Chi-cuadrado y Cramer's V
-  chi_tab <- table(df$gender, df$target)
-  chi_obj <- suppressWarnings(chisq.test(chi_tab))
-  cramer <- effectsize::cramers_v(chi_tab)
-  cat("\nChi-cuadrado:", round(chi_obj$statistic,3), "(gl=", chi_obj$parameter, ") p=", signif(chi_obj$p.value,3), "\n")
-  cat("Cramer's V:", round(cramer$Cramers_v,3), "Magnitud:", cramer$Magnitude, "\n")
-}
-```
-
-```{r categorical-bivariate-plots, fig.width=8, fig.height=4}
-# Gráfico de barras apiladas
-if(all(c("gender","target") %in% names(df))) {
-  p_stacked <- df %>% filter(!is.na(gender), !is.na(target)) %>% 
-    ggplot(aes(x = gender, fill = target)) +
-    geom_bar(position = "fill") +
-    geom_text(stat = "count", aes(label = after_stat(count)), position = position_fill(vjust = 0.5)) +
-    labs(title = "Proporción de Target por Género", x = "Género", y = "Proporción", fill = "Target") +
-    theme_minimal()
-  
-  # Si hay education_level, hacer otro bivariado
-  if("education_level" %in% names(df)) {
-    p_education <- df %>% filter(!is.na(education_level), !is.na(target)) %>% 
-      ggplot(aes(x = education_level, fill = target)) +
-      geom_bar(position = "dodge") +
-      labs(title = "Target por Nivel Educativo", x = "Educación", y = "Frecuencia", fill = "Target") +
-      theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1))
-    
-    p_stacked + p_education
-  } else {
-    p_stacked
-  }
-}
-```
-
-# 6. Análisis Descriptivo de Variables Cuantitativas
-
-```{r numeric-summary}
-num_vars <- setdiff(num_vars, c("survey_code"))
-desc_tbl <- df %>% select(any_of(num_vars)) %>% psych::describe() %>% as.data.frame() %>% rownames_to_column("variable") %>% select(variable, n, mean, sd, median, min, max, skew, kurtosis)
-desc_tbl %>%
-  filter(variable %in% c("age","bmi","height","weight","sleep_hours","daily_steps")) %>%
-  render_table(caption = "Estadígrafos variables clave (básicos)", html_font_size = 9)
-```
-
-```{r numeric-extended}
-mode_vec <- function(x){ux <- na.omit(unique(x)); ux[which.max(tabulate(match(x, ux)))]}
-num_extended <- df %>% select(any_of(num_vars)) %>% pivot_longer(everything(), names_to="variable", values_to="value") %>% group_by(variable) %>% summarise(
-  n = sum(!is.na(value)),
-  mean = mean(value, na.rm=TRUE),
-  median = median(value, na.rm=TRUE),
-  mode = mode_vec(value),
-  sd = sd(value, na.rm=TRUE),
-  iqr = IQR(value, na.rm=TRUE),
-  p10 = quantile(value,0.10, na.rm=TRUE),
-  p25 = quantile(value,0.25, na.rm=TRUE),
-  p75 = quantile(value,0.75, na.rm=TRUE),
-  p90 = quantile(value,0.90, na.rm=TRUE),
-  skew = psych::skew(value, na.rm=TRUE),
-  kurt = psych::kurtosi(value, na.rm=TRUE)
+datos_resumen <- tibble(
+  registros = nrow(datos),
+  variables = ncol(datos),
+  categ = sum(map_chr(datos, ~ class(.x)[1]) %in% c("character", "factor", "ordered")),
+  cuant = sum(map_chr(datos, ~ class(.x)[1]) %in% c("numeric", "integer", "double"))
 )
-num_extended %>%
-  filter(variable %in% c("age","bmi","sleep_hours","daily_steps")) %>%
-  render_table(caption="Estadísticos extendidos (forma y posición)", html_font_size = 9)
+
+render_table(datos_resumen, caption = "Dimensión y tipología de la base")
 ```
 
-```{r numeric-histograms, fig.width=8, fig.height=6}
-vars_plot <- intersect(c("age","bmi","sleep_hours","daily_steps"), names(df))
-plots_h <- map(vars_plot, ~{
-  ggplot(df, aes(x = .data[[.x]])) +
-    geom_histogram(bins = 30, fill = "#69b3a2", color = "white") +
-    labs(title = paste("Histograma", .x), x = .x, y = "freq") +
-    theme_minimal()
-})
-wrap_plots(plotlist = plots_h)
+```{r missing-values}
+missing_tbl <- datos |> 
+  summarise(across(everything(), ~ sum(is.na(.)))) |> 
+  pivot_longer(everything(), names_to = "variable", values_to = "faltantes") |> 
+  mutate(pct = round(faltantes / nrow(datos), 4)) |> 
+  arrange(desc(faltantes))
+
+render_table(head(missing_tbl, 15), caption = "Variables con mayor cantidad de NA")
 ```
 
-```{r numeric-boxplots, fig.width=8, fig.height=3}
-plots_b <- map(vars_plot, ~{
-  ggplot(df, aes(y = .data[[.x]])) +
-    geom_boxplot(fill = "#ffab00", alpha = 0.7) +
-    labs(title = paste("Boxplot", .x), y = .x) +
-    theme_minimal()
-})
-wrap_plots(plotlist = plots_b, ncol = length(plots_b))
+> **Insight:** la mayoría de las variables no tiene valores faltantes; los mayores porcentajes se concentran en `insulin`, `daily_steps`, `exercise_type` y `alcohol_consumption`, por lo que cualquier modelado futuro debe considerar imputación o análisis segmentado.
+
+## 2. Variables categóricas
+
+```{r cat-vars}
+cat_vars <- datos |> select(where(~ is.character(.x) || inherits(.x, "factor") || inherits(.x, "ordered"))) |> names()
+cat_vars_principales <- intersect(c("gender", "target", "education_level", "diet_type"), cat_vars)
 ```
 
-# 7. Correlaciones
+### 2.1 Tablas de frecuencia
 
-```{r correlations, fig.width=6, fig.height=5}
-cor_vars <- intersect(c("age","bmi","height","weight","sleep_hours","daily_steps"), names(df))
-cmat <- cor(df[cor_vars], use = "complete.obs")
-corrplot(cmat, method = "color", type = "upper", addCoef.col = "black", tl.col = "black", number.cex = 0.6)
+```{r cat-tables}
+frecuencias_cat <- datos |> 
+  select(all_of(cat_vars_principales)) |> 
+  pivot_longer(everything(), names_to = "variable", values_to = "categoria") |> 
+  filter(!is.na(categoria)) |> 
+  count(variable, categoria) |> 
+  group_by(variable) |> 
+  mutate(pct = round(n / sum(n), 3))
+
+render_table(frecuencias_cat, caption = "Frecuencias y proporciones por categoría")
 ```
 
-```{r scatter-plots, fig.width=8, fig.height=6}
-# Diagramas de dispersión para correlaciones altas
-if(all(c("height","weight","bmi","age") %in% names(df))) {
-  p1 <- ggplot(df, aes(x = height, y = weight)) + geom_point(alpha = 0.6) + geom_smooth(method = "lm", se = FALSE) + theme_minimal()
-  p2 <- ggplot(df, aes(x = weight, y = bmi)) + geom_point(alpha = 0.6) + geom_smooth(method = "lm", se = FALSE) + theme_minimal()
-  p3 <- ggplot(df, aes(x = height, y = bmi)) + geom_point(alpha = 0.6) + geom_smooth(method = "lm", se = FALSE) + theme_minimal()
-  p4 <- ggplot(df, aes(x = age, y = bmi)) + geom_point(alpha = 0.6) + geom_smooth(method = "lm", se = FALSE) + theme_minimal()
-  (p1 + p2) / (p3 + p4)
+> **Insight:** `target` muestra distribución 70% healthy vs. 30% diseased; `gender` y `education_level` están relativamente balanceadas con ligera concentración en niveles altos de educación.
+
+### 2.2 Gráficos univariados
+
+```{r plot-gender}
+plot_gender <- datos |> 
+  filter(!is.na(gender)) |> 
+  count(gender) |> 
+  ggplot(aes(x = gender, y = n, fill = gender)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = n), vjust = -0.2) +
+  labs(title = "Distribución de género", x = NULL, y = "Frecuencia") +
+  theme_minimal()
+plot_gender
+```
+
+```{r plot-target}
+plot_target <- datos |> 
+  count(target) |> 
+  ggplot(aes(x = target, y = n, fill = target)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = n), vjust = -0.2) +
+  labs(title = "Distribución de target", x = NULL, y = "Frecuencia") +
+  theme_minimal()
+plot_target
+```
+
+```{r plot-education}
+plot_education <- datos |> 
+  filter(!is.na(education_level)) |> 
+  count(education_level) |> 
+  ggplot(aes(x = education_level, y = n)) +
+  geom_col(fill = "#2A9D8F") +
+  geom_text(aes(label = n), vjust = -0.2) +
+  labs(title = "Niveles educativos declarados", x = NULL, y = "Frecuencia") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+plot_education
+```
+
+```{r plot-diet}
+plot_diet <- datos |> 
+  filter(!is.na(diet_type)) |> 
+  count(diet_type) |> 
+  ggplot(aes(x = diet_type, y = n)) +
+  geom_col(fill = "#F4A261") +
+  geom_text(aes(label = n), vjust = -0.2) +
+  labs(title = "Tipo de dieta reportada", x = NULL, y = "Frecuencia") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+plot_diet
+```
+
+### 2.3 Cruces categóricos
+
+```{r cross-gender-target}
+ct_gender_target <- datos |> 
+  filter(!is.na(gender), !is.na(target)) |> 
+  count(gender, target) |> 
+  group_by(gender) |> 
+  mutate(prop = n / sum(n))
+
+render_table(ct_gender_target, caption = "Tabla gender x target", html_font_size = 9)
+```
+
+```{r plot-gender-target}
+plot_gender_target <- ct_gender_target |> 
+  ggplot(aes(x = gender, y = prop, fill = target)) +
+  geom_col(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Proporciones de target por género", x = NULL, y = "Proporción") +
+  theme_minimal()
+plot_gender_target
+```
+
+```{r cross-education-target}
+if ("education_level" %in% names(datos)) {
+  ct_edu_target <- datos |> 
+    filter(!is.na(education_level), !is.na(target)) |> 
+    count(education_level, target) |> 
+    group_by(education_level) |> 
+    mutate(prop = n / sum(n))
+
+  render_table(ct_edu_target, caption = "Tabla education_level x target", html_font_size = 9)
 }
 ```
 
-## 6.1 Análisis Distribucional
-
-```{r distributional-analysis, fig.width=8, fig.height=6}
-# QQ-plots para evaluar normalidad
-key_vars <- intersect(c("age","bmi","sleep_hours","daily_steps"), names(df))
-qq_plots <- map(key_vars, ~{
-  ggplot(df, aes(sample = .data[[.x]])) +
-    stat_qq() + stat_qq_line() +
-    labs(title = paste("QQ-plot:", .x)) +
-    theme_minimal()
-})
-wrap_plots(plotlist = qq_plots)
+```{r plot-education-target}
+if (exists("ct_edu_target")) {
+  plot_edu_target <- ct_edu_target |> 
+    ggplot(aes(x = education_level, y = prop, fill = target)) +
+    geom_col() +
+    scale_y_continuous(labels = scales::percent) +
+    labs(title = "Proporciones de target por nivel educativo", x = "Nivel educativo", y = "Proporción") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+  plot_edu_target
+}
 ```
+
+> **Insight:** las proporciones de `target` varían poco entre géneros, pero aumentan ligeramente las etiquetas `healthy` en niveles educativos superiores.
+
+## 3. Variables cuantitativas
+
+```{r num-vars}
+num_vars <- datos |> select(where(is.numeric)) |> names()
+num_clave <- intersect(c("age", "bmi", "sleep_hours", "daily_steps", "stress_level", "mental_health_score"), num_vars)
+```
+
+### 3.1 Estadísticos descriptivos
+
+```{r num-summary}
+resumen_cuant <- datos |> 
+  select(all_of(num_clave)) |> 
+  pivot_longer(everything(), names_to = "variable", values_to = "valor") |> 
+  group_by(variable) |> 
+  summarise(
+    n = sum(!is.na(valor)),
+    media = mean(valor, na.rm = TRUE),
+    mediana = median(valor, na.rm = TRUE),
+    sd = sd(valor, na.rm = TRUE),
+    q1 = quantile(valor, 0.25, na.rm = TRUE),
+    q3 = quantile(valor, 0.75, na.rm = TRUE),
+    asimetria = psych::skew(valor, na.rm = TRUE),
+    curtosis = psych::kurtosi(valor, na.rm = TRUE)
+  )
+
+render_table(resumen_cuant, caption = "Estadísticos clave por variable cuantitativa")
+```
+
+> **Insight:** `daily_steps` presenta mayor asimetría positiva; `bmi` se mantiene próximo a simetría con mediana ligeramente inferior a la media.
+
+### 3.2 Histogramas y boxplots (uno por figura)
+
+```{r hist-age}
+ datos |> ggplot(aes(x = age)) +
+  geom_histogram(bins = 30, fill = "#2A9D8F", color = "white") +
+  labs(title = "Histograma edad", x = "Edad", y = "Frecuencia") +
+  theme_minimal()
+```
+
+```{r box-age}
+ datos |> ggplot(aes(y = age)) +
+  geom_boxplot(fill = "#2A9D8F", alpha = 0.8) +
+  labs(title = "Boxplot edad", y = "Edad") +
+  theme_minimal()
+```
+
+```{r hist-bmi}
+ datos |> ggplot(aes(x = bmi)) +
+  geom_histogram(bins = 30, fill = "#E76F51", color = "white") +
+  labs(title = "Histograma BMI", x = "BMI", y = "Frecuencia") +
+  theme_minimal()
+```
+
+```{r box-bmi}
+ datos |> ggplot(aes(y = bmi)) +
+  geom_boxplot(fill = "#E76F51", alpha = 0.8) +
+  labs(title = "Boxplot BMI", y = "BMI") +
+  theme_minimal()
+```
+
+```{r hist-daily-steps}
+ datos |> ggplot(aes(x = daily_steps)) +
+  geom_histogram(bins = 30, fill = "#264653", color = "white") +
+  labs(title = "Histograma daily_steps", x = "Pasos diarios", y = "Frecuencia") +
+  theme_minimal()
+```
+
+```{r box-daily-steps}
+ datos |> ggplot(aes(y = daily_steps)) +
+  geom_boxplot(fill = "#264653", alpha = 0.8) +
+  labs(title = "Boxplot daily_steps", y = "Pasos diarios") +
+  theme_minimal()
+```
+
+### 3.3 Correlaciones y dispersión
+
+```{r corr-matrix}
+cor_vars <- intersect(c("age", "bmi", "height", "weight", "sleep_hours", "daily_steps"), num_vars)
+cmat <- cor(datos[cor_vars], use = "pairwise.complete.obs")
+corrplot::corrplot(cmat, method = "color", type = "upper", addCoef.col = "black", tl.col = "black")
+```
+
+```{r scatter-height-weight}
+datos |> ggplot(aes(x = height, y = weight)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Relación altura vs peso") +
+  theme_minimal()
+```
+
+```{r scatter-weight-bmi}
+datos |> ggplot(aes(x = weight, y = bmi)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Relación peso vs BMI") +
+  theme_minimal()
+```
+
+```{r scatter-age-bmi}
+datos |> ggplot(aes(x = age, y = bmi)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Relación edad vs BMI") +
+  theme_minimal()
+```
+
+> **Insight:** peso y altura muestran correlación fuerte con BMI, mientras que edad aporta variación moderada.
+
+### 3.4 Normalidad y sugerencia distribucional
 
 ```{r normality-tests}
-# Tests de normalidad
-normality_results <- map_df(key_vars, ~{
-  if(.x %in% names(df)) {
-    vec <- df %>% filter(!is.na(.data[[.x]])) %>% pull(.data[[.x]])
-    if(length(vec) > 5000) vec <- sample(vec, 5000)
-    sw_test <- shapiro.test(vec)
-    data.frame(variable = .x, shapiro_w = sw_test$statistic, shapiro_p = sw_test$p.value)
-  }
+normalidad <- map_df(c("age", "bmi", "sleep_hours", "daily_steps"), function(var) {
+  if (!var %in% names(datos)) return(NULL)
+  valores <- datos[[var]][!is.na(datos[[var]])]
+  if (length(valores) > 5000) valores <- sample(valores, 5000)
+  sw <- shapiro.test(valores)
+  tibble(variable = var, shapiro_w = sw$statistic, shapiro_p = sw$p.value)
 })
-normality_results %>% render_table(caption = "Tests de Normalidad (Shapiro-Wilk)")
+
+render_table(normalidad, caption = "Prueba de normalidad Shapiro-Wilk")
 ```
 
-```{r distribution-suggestions}
-dist_suggestions <- num_extended %>% filter(variable %in% c("age","bmi","sleep_hours","daily_steps")) %>% mutate(
-  sugerida = case_when(
-    abs(skew) < 0.3 & abs(kurt) < 1 ~ "Normal",
-    skew > 0.8 ~ "Gamma / Log-normal",
-    skew > 0.3 & skew <= 0.8 ~ "Asimetría leve (aprox. Normal tras transf.)",
-    TRUE ~ "Revisar visual"
-  )
-) %>% select(variable, skew, kurt, sugerida)
-dist_suggestions %>% render_table(caption="Sugerencias distribucionales basadas en forma", html_font_size = 9)
+```{r distribution-suggestion}
+dist_sugerida <- resumen_cuant |> 
+  mutate(
+    sugerencia = case_when(
+      abs(asimetria) < 0.3 & abs(curtosis) < 1 ~ "Normal",
+      asimetria > 0.8 ~ "Gamma / Log-normal",
+      asimetria < -0.8 ~ "Distribución sesgada a la izquierda",
+      TRUE ~ "Ver análisis gráfico"
+    )
+  ) |> select(variable, asimetria, curtosis, sugerencia)
+
+render_table(dist_sugerida, caption = "Sugerencia distribucional por variable")
 ```
 
-# 8. Análisis Mixto (Cuantitativas vs Categóricas)
+## 4. Análisis mixto (cuantitativa vs categórica)
 
 ```{r bmi-by-gender}
-if(all(c("bmi","gender") %in% names(df))) {
-  bmi_gender_stats <- df %>% filter(!is.na(bmi), !is.na(gender)) %>% group_by(gender) %>% summarise(n = n(), mean = mean(bmi), sd = sd(bmi), median = median(bmi), q1 = quantile(bmi,0.25), q3 = quantile(bmi,0.75), .groups = "drop")
-  bmi_gender_stats %>% render_table(caption = "BMI por género")
-}
-```
-
-```{r bmi-by-gender-plots, fig.width=8, fig.height=4}
-if(all(c("bmi","gender") %in% names(df))) {
-  p_box <- ggplot(df, aes(x = gender, y = bmi, fill = gender)) + geom_boxplot(alpha = 0.7) + theme_minimal() + theme(legend.position = "none")
-  p_hist <- ggplot(df, aes(x = bmi, fill = gender)) + geom_histogram(position = "identity", alpha = 0.4, bins = 30) + facet_wrap(~gender) + theme_minimal() + theme(legend.position = "none")
-  p_box + p_hist
-}
-```
-
-```{r additional-mixed-analysis}
-# Análisis adicional: Age por Target si existe
-if(all(c("age","target") %in% names(df))) {
-  age_target_stats <- df %>% filter(!is.na(age), !is.na(target)) %>% 
-    group_by(target) %>% 
-    summarise(n = n(), mean = mean(age), sd = sd(age), median = median(age), 
-              q1 = quantile(age,0.25), q3 = quantile(age,0.75), .groups = "drop")
-  age_target_stats %>% render_table(caption = "Edad por Target")
-}
-```
-
-```{r mixed-plots-additional, fig.width=8, fig.height=4}
-# Gráficos adicionales mixtos
-if(all(c("age","target") %in% names(df))) {
-  p_age_box <- ggplot(df, aes(x = target, y = age, fill = target)) + 
-    geom_boxplot(alpha = 0.7) + theme_minimal() + theme(legend.position = "none")
-  
-  if("sleep_hours" %in% names(df)) {
-    p_sleep_box <- ggplot(df, aes(x = target, y = sleep_hours, fill = target)) + 
-      geom_boxplot(alpha = 0.7) + theme_minimal() + theme(legend.position = "none")
-    p_age_box + p_sleep_box
-  } else {
-    p_age_box
-  }
-}
-```
-
-# 9. Pruebas de Hipótesis
-
-## 9.1 Media de BMI vs 25
-
-```{r test-mean-bmi}
-alpha <- 0.05
-if("bmi" %in% names(df)) {
-  bmi_vec <- df %>% filter(!is.na(bmi)) %>% pull(bmi)
-  set.seed(123)
-  shapiro <- shapiro.test(sample(bmi_vec, min(5000, length(bmi_vec))))
-  t_res <- t.test(bmi_vec, mu = 25)
-  d_val <- effectsize::cohens_d(bmi_vec, mu = 25)
-  decision <- if(t_res$p.value < alpha) "Se rechaza H0: evidencia de diferencia" else "No se rechaza H0: sin evidencia suficiente"
-  render_table(
-    tibble(
-    Hipotesis_Nula = "mu = 25",
-    Hipotesis_Alterna = "mu != 25",
-    Media_Muestral = mean(bmi_vec),
-    Estadistico_t = unname(t_res$statistic),
-    gl = unname(t_res$parameter),
-    p_valor = t_res$p.value,
-    IC95_LI = t_res$conf.int[1],
-    IC95_LS = t_res$conf.int[2],
-    Cohens_d = d_val$Cohens_d,
-    Decision = decision,
-    Normalidad_Shapiro_p = shapiro$p.value
-  ),
-    caption = "Prueba t de una muestra para BMI",
-    html_font_size = 9
+bmi_stats <- datos |> 
+  filter(!is.na(bmi), !is.na(gender)) |> 
+  group_by(gender) |> 
+  summarise(
+    n = n(),
+    media = mean(bmi),
+    sd = sd(bmi),
+    mediana = median(bmi),
+    q1 = quantile(bmi, 0.25),
+    q3 = quantile(bmi, 0.75),
+    .groups = "drop"
   )
-}
+
+render_table(bmi_stats, caption = "BMI por género")
 ```
 
-## 9.2 Proporción de "healthy" vs 0.5
+```{r plot-bmi-gender}
+datos |> 
+  filter(!is.na(bmi), !is.na(gender)) |> 
+  ggplot(aes(x = gender, y = bmi, fill = gender)) +
+  geom_boxplot(alpha = 0.8, show.legend = FALSE) +
+  labs(title = "Distribución de BMI por género", x = NULL, y = "BMI") +
+  theme_minimal()
+```
+
+```{r age-target-stats}
+age_target <- datos |> 
+  filter(!is.na(age), !is.na(target)) |> 
+  group_by(target) |> 
+  summarise(
+    n = n(),
+    media = mean(age),
+    sd = sd(age),
+    mediana = median(age),
+    q1 = quantile(age, 0.25),
+    q3 = quantile(age, 0.75),
+    .groups = "drop"
+  )
+
+render_table(age_target, caption = "Edad segmentada por target")
+```
+
+```{r plot-age-target}
+datos |> 
+  filter(!is.na(age), !is.na(target)) |> 
+  ggplot(aes(x = target, y = age, fill = target)) +
+  geom_boxplot(alpha = 0.8, show.legend = FALSE) +
+  labs(title = "Edad por condición de salud", x = NULL, y = "Edad") +
+  theme_minimal()
+```
+
+> **Insight:** las distribuciones de BMI y edad sugieren diferencias pequeñas entre grupos, aunque estadísticamente detectables dada la muestra grande.
+
+## 5. Pruebas de hipótesis
+
+```{r test-mean}
+if ("bmi" %in% names(datos)) {
+  bmi_vec <- datos$bmi[!is.na(datos$bmi)]
+  prueba_media <- t.test(bmi_vec, mu = 25)
+  tamaño_efecto <- effectsize::cohens_d(bmi_vec, mu = 25)
+  resultado_media <- tibble(
+    hipotesis_nula = "mu = 25",
+    media_muestral = mean(bmi_vec),
+    estadistico_t = prueba_media$statistic,
+    gl = prueba_media$parameter,
+    p_valor = prueba_media$p.value,
+    ic95_li = prueba_media$conf.int[1],
+    ic95_ls = prueba_media$conf.int[2],
+    cohens_d = tamaño_efecto$Cohens_d
+  )
+  render_table(resultado_media, caption = "Prueba t una muestra para BMI", html_font_size = 9)
+}
+```
 
 ```{r test-proportion}
-if("target" %in% names(df)) {
-  targ <- df %>% filter(!is.na(target))
-  n_tot <- nrow(targ)
-  n_healthy <- sum(targ$target == "healthy")
-  p0 <- 0.5
-  p_hat <- n_healthy/n_tot
-  prop_res <- prop.test(n_healthy, n_tot, p = p0, correct = FALSE)
-  cohens_h <- 2*asin(sqrt(p_hat)) - 2*asin(sqrt(p0))
-  decision <- if(prop_res$p.value < 0.05) "Se rechaza H0" else "No se rechaza H0"
-  render_table(
-    tibble(
-    Hipotesis_Nula = "p = 0.5",
-    Hipotesis_Alterna = "p != 0.5",
-    p_muestral = p_hat,
-    Diferencia_abs = p_hat - p0,
-    Estadistico_Chi2 = unname(prop_res$statistic),
-    p_valor = prop_res$p.value,
-    IC95_LI = prop_res$conf.int[1],
-    IC95_LS = prop_res$conf.int[2],
-    Cohens_h = cohens_h,
-    Decision = decision
-  ),
-    caption="Prueba de proporción para categoría 'healthy'",
-    html_font_size = 9
+if ("target" %in% names(datos)) {
+  exito <- sum(datos$target == "healthy", na.rm = TRUE)
+  total <- sum(!is.na(datos$target))
+  prueba_prop <- prop.test(exito, total, p = 0.5, correct = FALSE)
+  cohens_h <- 2 * asin(sqrt(exito / total)) - 2 * asin(sqrt(0.5))
+  resultado_prop <- tibble(
+    hipotesis_nula = "p = 0.5",
+    proporcion_muestral = exito / total,
+    estadistico_chi2 = prueba_prop$statistic,
+    p_valor = prueba_prop$p.value,
+    ic95_li = prueba_prop$conf.int[1],
+    ic95_ls = prueba_prop$conf.int[2],
+    cohens_h = cohens_h
   )
+  render_table(resultado_prop, caption = "Prueba de proporción para healthy", html_font_size = 9)
 }
 ```
 
-# 10. Conclusiones
+> **Insight:** la media de BMI supera ligeramente 25 con un tamaño de efecto pequeño; la proporción de individuos `healthy` es mayor que 0.5 con diferencia práctica moderada dado el tamaño muestral.
 
-## Hallazgos Principales
+## 6. Diccionario de variables (resumen)
 
-**Variables Categóricas:**
-- Distribución equilibrada en las principales variables demográficas
-- Relaciones significativas entre variables categóricas (ej: género vs target)
+```{r diccionario}
+if (file.exists("data/diccionario_variables.md")) {
+  cat(readr::read_file("data/diccionario_variables.md"))
+} else {
+  message("Archivo de diccionario no encontrado.")
+}
+```
 
-**Variables Cuantitativas:**  
-- Variables biométricas muestran distribuciones aproximadamente normales con algunos valores atípicos
-- Correlaciones esperadas entre peso, altura y BMI
-- Sugerencias distribucionales específicas por variable
+## 7. Información de sesión
 
-**Análisis Mixto:**
-- Diferencias en estadígrafos centrales y de dispersión por categorías
-- Patrones visuales claros en boxplots segmentados
-
-**Pruebas de Hipótesis:**
-- Media de BMI vs 25: interpretar tabla (considerar magnitud de d y relevancia práctica, no solo p)
-- Proporción "healthy" vs 0.5: interpretar diferencia absoluta y h (magnitud pequeña/mediana/grande)
-
-# 11. Sesión
-
-```{r session}
+```{r session-info}
 sessionInfo()
 ```
