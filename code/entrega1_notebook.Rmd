@@ -39,6 +39,7 @@ suppressPackageStartupMessages({
 })
 
 dir.create(file.path("..", "figs", "entrega1"), showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path("..", "tab"), showWarnings = FALSE, recursive = TRUE)
 
 render_table <- function(data, caption = NULL, html_font_size = 10, ...) {
   tab <- knitr::kable(data, caption = caption, ...)
@@ -61,6 +62,18 @@ ruta_datos <- if (file.exists("data/health_lifestyle_classification.csv")) {
 datos <- readr::read_csv(ruta_datos, show_col_types = FALSE) |> 
   janitor::clean_names()
 
+# Tipificación básica de ordinales (si existen)
+ord_levels <- list(
+  sleep_quality = c("Poor", "Fair", "Good", "Excellent"),
+  alcohol_consumption = c("None", "Occasionally", "Regularly"),
+  smoking_level = c("Non-smoker", "Light", "Moderate", "Heavy"),
+  healthcare_access = c("Poor", "Moderate", "Good", "Excellent"),
+  device_usage = c("Low", "Moderate", "High")
+)
+for (nm in names(ord_levels)) {
+  if (nm %in% names(datos)) datos[[nm]] <- factor(datos[[nm]], levels = ord_levels[[nm]], ordered = TRUE)
+}
+
 datos_resumen <- tibble(
   registros = nrow(datos),
   variables = ncol(datos),
@@ -68,6 +81,7 @@ datos_resumen <- tibble(
   cuant = sum(map_chr(datos, ~ class(.x)[1]) %in% c("numeric", "integer", "double"))
 )
 
+readr::write_csv(datos_resumen, file.path("..", "tab", "tipologia.csv"))
 render_table(datos_resumen, caption = "Dimensión y tipología de la base")
 ```
 
@@ -78,6 +92,7 @@ missing_tbl <- datos |>
   mutate(pct = round(faltantes / nrow(datos), 4)) |> 
   arrange(desc(faltantes))
 
+readr::write_csv(missing_tbl, file.path("..", "tab", "na_by_var.csv"))
 render_table(head(missing_tbl, 15), caption = "Variables con mayor cantidad de NA")
 ```
 
@@ -101,6 +116,7 @@ frecuencias_cat <- datos |>
   group_by(variable) |> 
   mutate(pct = round(n / sum(n), 3))
 
+readr::write_csv(frecuencias_cat, file.path("..", "tab", "freq_all_cats.csv"))
 render_table(frecuencias_cat, caption = "Frecuencias y proporciones por categoría")
 ```
 
@@ -231,6 +247,7 @@ resumen_cuant <- datos |>
     curtosis = psych::kurtosi(valor, na.rm = TRUE)
   )
 
+readr::write_csv(resumen_cuant, file.path("..", "tab", "num_summary.csv"))
 render_table(resumen_cuant, caption = "Estadísticos clave por variable cuantitativa")
 ```
 
@@ -358,6 +375,7 @@ bmi_stats <- datos |>
     .groups = "drop"
   )
 
+readr::write_csv(bmi_stats, file.path("..", "tab", "num_by_group_bmi_gender.csv"))
 render_table(bmi_stats, caption = "BMI por género")
 ```
 
@@ -384,6 +402,7 @@ age_target <- datos |>
     .groups = "drop"
   )
 
+readr::write_csv(age_target, file.path("..", "tab", "num_by_group_age_target.csv"))
 render_table(age_target, caption = "Edad segmentada por target")
 ```
 
@@ -415,6 +434,7 @@ if ("bmi" %in% names(datos)) {
     ic95_ls = prueba_media$conf.int[2],
     cohens_d = tamaño_efecto$Cohens_d
   )
+  readr::write_csv(resultado_media, file.path("..", "tab", "test_mean_bmi.csv"))
   render_table(resultado_media, caption = "Prueba t una muestra para BMI", html_font_size = 9)
 }
 ```
@@ -434,11 +454,99 @@ if ("target" %in% names(datos)) {
     ic95_ls = prueba_prop$conf.int[2],
     cohens_h = cohens_h
   )
+  readr::write_csv(resultado_prop, file.path("..", "tab", "test_prop_target.csv"))
   render_table(resultado_prop, caption = "Prueba de proporción para healthy", html_font_size = 9)
 }
 ```
 
 > **Insight:** la media de BMI supera ligeramente 25 con un tamaño de efecto pequeño; la proporción de individuos `healthy` es mayor que 0.5 con diferencia práctica moderada dado el tamaño muestral.
+
+### 5.1 Candidatas de prueba (media) y selección
+
+```{r candidate-mean-tests}
+mean_candidates <- tibble::tribble(
+  ~var,           ~mu0, ~just,                          ~units,
+  "sleep_hours",   7,   "Referencia higiene del sueño",  "horas",
+  "bmi",          25,   "Umbral normal-superior BMI",    "kg/m^2",
+  "blood_pressure",120, "Sistólica media saludable",     "mmHg"
+) |> 
+  dplyr::filter(var %in% names(datos)) |> 
+  rowwise() |> 
+  mutate(
+    y = list(stats::na.omit(datos[[var]])),
+    n = length(y),
+    media = mean(y),
+    sd = stats::sd(y),
+    t_p = tryCatch(stats::t.test(y, mu = mu0)$p.value, error = function(e) NA_real_),
+    d = ifelse(sd > 0, (media - mu0)/sd, NA_real_),
+    power_approx = tryCatch(stats::power.t.test(n = n, delta = abs(media - mu0), sd = sd, sig.level = 0.05, type = "one.sample")$power, error = function(e) NA_real_)
+  ) |> 
+  ungroup() |> 
+  select(var, mu0, just, units, n, media, sd, d, t_p, power_approx) |> 
+  arrange(dplyr::desc(abs(d)))
+
+readr::write_csv(mean_candidates, file.path("..", "tab", "test_mean_candidates.csv"))
+render_table(mean_candidates, caption = "Candidatas prueba de media (ordenadas por |d|)", html_font_size = 9)
+```
+
+```{r select-mean}
+selected_mean <- mean_candidates |> slice_head(n = 1)
+selected_mean
+```
+
+### 5.2 Candidatas de prueba (proporción) y selección
+
+```{r candidate-prop-tests}
+prop_candidates <- tibble::tribble(
+  ~var,              ~level,         ~p0,   ~just,
+  "target",          "healthy",      0.50, "Balance operativo",
+  "smoking_level",   "Heavy",        0.08, "Referencia de tabaquismo pesado",
+  "alcohol_consumption","Regularly", 0.20, "Consumo regular esperado"
+) |> 
+  dplyr::filter(var %in% names(datos)) |> 
+  rowwise() |> 
+  mutate(
+    x = sum(stats::na.omit(datos[[var]]) == level),
+    n = sum(!is.na(datos[[var]])),
+    p_hat = x/n,
+    test = list(tryCatch(stats::prop.test(x, n, p = p0, correct = FALSE), error = function(e) NULL)),
+    p_valor = ifelse(is.null(test), NA_real_, test$p.value),
+    ic_li = ifelse(is.null(test), NA_real_, test$conf.int[1]),
+    ic_ls = ifelse(is.null(test), NA_real_, test$conf.int[2]),
+    h = 2*asin(sqrt(p_hat)) - 2*asin(sqrt(p0))
+  ) |> 
+  ungroup() |> 
+  select(var, level, p0, just, n, x, p_hat, h, p_valor, ic_li, ic_ls) |> 
+  arrange(dplyr::desc(abs(h)))
+
+readr::write_csv(prop_candidates, file.path("..", "tab", "test_prop_candidates.csv"))
+render_table(prop_candidates, caption = "Candidatas prueba de proporción (ordenadas por |h|)", html_font_size = 9)
+```
+
+```{r select-prop}
+selected_prop <- prop_candidates |> slice_head(n = 1)
+selected_prop
+```
+
+## 6. Densidades por categoría (figuras separadas)
+
+```{r density-bmi-by-gender}
+if (all(c("bmi","gender") %in% names(datos))) {
+  ggplot(datos, aes(x = bmi, fill = gender)) +
+    geom_density(alpha = 0.4) +
+    labs(title = "Densidad de BMI por género", x = "BMI", y = "Densidad") +
+    theme_minimal()
+}
+```
+
+```{r density-sleep-by-target}
+if (all(c("sleep_hours","target") %in% names(datos))) {
+  ggplot(datos, aes(x = sleep_hours, fill = target)) +
+    geom_density(alpha = 0.4) +
+    labs(title = "Densidad de horas de sueño por target", x = "Horas de sueño", y = "Densidad") +
+    theme_minimal()
+}
+```
 
 ## 6. Diccionario de variables (resumen)
 

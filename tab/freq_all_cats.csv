@@ -1,0 +1,13 @@
+variable,categoria,n,pct
+diet_type,Keto,24764,0.248
+diet_type,Omnivore,25089,0.251
+diet_type,Vegan,25122,0.251
+diet_type,Vegetarian,25025,0.25
+education_level,Bachelor,25363,0.254
+education_level,High School,25028,0.25
+education_level,Master,24992,0.25
+education_level,PhD,24617,0.246
+gender,Female,49868,0.499
+gender,Male,50132,0.501
+target,diseased,29903,0.299
+target,healthy,70097,0.701
